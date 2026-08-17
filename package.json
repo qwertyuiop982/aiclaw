@@ -1,0 +1,21 @@
+{
+  "name": "aichat",
+  "version": "0.1.0",
+  "description": "AI Chat CLI - OpenAI-compatible multi-config",
+  "license": "MIT",
+  "author": "save",
+  "type": "commonjs",
+  "main": "bin/aiclaw.js",
+  "bin": {
+    "aiclaw": "./bin/aiclaw.js"
+  },
+  "scripts": {
+    "start": "node bin/aiclaw.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "axios": "^1.7.0",
+    "chalk": "^4.1.2",
+    "commander": "^12.0.0"
+  }
+}
