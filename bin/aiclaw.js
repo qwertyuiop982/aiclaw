@@ -122,7 +122,7 @@ prog
           }
         }
       };
-      const r = await loopMod.runAgentLoop(useCfg, messages, { tools: useTools, maxSteps, onStep });
+      const r = await loopMod.runAgentLoop(useCfg, messages, { tools: useTools, maxSteps, onStep, ctx: { cwd: process.cwd(), allowShell: false, allowCmds: [] } });
       const finalText = (r && r.finalText) || '';
       const rendered = opts.strip === false ? finalText : utils.renderReply(finalText);
       process.stdout.write('\n' + rendered + '\n');

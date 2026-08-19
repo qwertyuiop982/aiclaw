@@ -3,6 +3,8 @@
 
 static QString configPath() { return QDir::homePath() + "/.aiclaw/config.json"; }
 static QString sessionsPath() { return QDir::homePath() + "/.aiclaw/sessions"; }
+static QString workspacePath() { return qEnvironmentVariable("AICLAW_WORKSPACE", QDir::currentPath()); }
+static QString safePath(const QString &raw) { QFileInfo root(workspacePath()), candidate(raw.isEmpty() ? root.absoluteFilePath() : (QDir::isAbsolutePath(raw) ? raw : root.absoluteFilePath(raw))); QString r=root.canonicalFilePath(), c=candidate.canonicalFilePath(); if (r.isEmpty()) r=root.absoluteFilePath(); if (c.isEmpty()) c=candidate.absoluteFilePath(); return (c==r || c.startsWith(r+"/")) ? c : QString(); }
 
 static QString toolsPrompt() {
     return "\n\n# Tool calling\nWhen tools are enabled, call a tool with a fenced JSON block:\n```tool_call\n{\"name\":\"list_dir|read_file|grep_search|shell\",\"arguments\":{...}}\n```\nAfter a result is returned, answer the user. Available tools: list_dir(path), read_file(path), grep_search(pattern,path), shell(command).";
@@ -11,7 +13,7 @@ static QString toolsPrompt() {
 class SettingsDialog : public QDialog {
 public:
     QComboBox *profile;
-    QLineEdit *url, *key, *model;
+    QLineEdit *url, *key, *model, *reasoning;
     QTextEdit *system;
     QComboBox *thinking;
     QCheckBox *tools, *toolPrompt;
@@ -24,14 +26,14 @@ public:
         for (const QString &name : configs.keys()) profile->addItem(name);
         profile->setCurrentText(current);
         url = new QLineEdit; key = new QLineEdit; key->setEchoMode(QLineEdit::Password);
-        model = new QLineEdit; system = new QTextEdit; system->setMaximumHeight(110);
+        model = new QLineEdit; reasoning = new QLineEdit; system = new QTextEdit; system->setMaximumHeight(110);
         thinking = new QComboBox; thinking->addItems({"default", "enabled", "disabled"});
         tools = new QCheckBox("Enable tool calling");
         toolPrompt = new QCheckBox("Inject tool prompt");
         toolPrompt->setToolTip("Controls only the tool protocol injected into the system message.");
         auto *form = new QFormLayout;
         form->addRow("Configuration", profile); form->addRow("API URL", url); form->addRow("API key", key);
-        form->addRow("Model", model); form->addRow("Thinking", thinking); form->addRow("System prompt", system);
+        form->addRow("Model", model); form->addRow("Thinking", thinking); form->addRow("Reasoning effort", reasoning); form->addRow("System prompt", system);
         form->addRow(tools); form->addRow(toolPrompt);
         auto *save = new QPushButton("Save"), *cancel = new QPushButton("Cancel");
         auto *buttons = new QHBoxLayout; buttons->addStretch(); buttons->addWidget(cancel); buttons->addWidget(save);
@@ -43,13 +45,13 @@ public:
     }
     void load(const QJsonObject &c) {
         url->setText(c["baseURL"].toString()); key->setText(c["apiKey"].toString()); model->setText(c["model"].toString());
-        system->setPlainText(c["system"].toString()); thinking->setCurrentText(c["thinking"].toString().isEmpty() ? "default" : c["thinking"].toString());
+        system->setPlainText(c["system"].toString()); thinking->setCurrentText(c["thinking"].toString().isEmpty() ? "default" : c["thinking"].toString()); reasoning->setText(c["reasoning_effort"].toString());
         tools->setChecked(c["toolsEnabled"].toBool(false)); toolPrompt->setChecked(c["toolPromptEnabled"].toBool(false)); toolPrompt->setEnabled(tools->isChecked());
     }
     QString selectedName() const { return profile->currentText(); }
     QJsonObject value() const {
         QJsonObject c; c["baseURL"] = url->text().trimmed(); c["apiKey"] = key->text(); c["model"] = model->text().trimmed();
-        c["system"] = system->toPlainText(); c["thinking"] = thinking->currentText() == "default" ? "" : thinking->currentText();
+        c["system"] = system->toPlainText(); c["thinking"] = thinking->currentText() == "default" ? "" : thinking->currentText(); c["reasoning_effort"] = reasoning->text().trimmed();
         c["toolsEnabled"] = tools->isChecked(); c["toolPromptEnabled"] = tools->isChecked() && toolPrompt->isChecked(); return c;
     }
 };
@@ -123,10 +125,10 @@ private:
         if (!system.trimmed().isEmpty()) out.prepend(QJsonObject{{"role", "system"}, {"content", system}}); return out;
     }
     QString runTool(const QString &name, const QJsonObject &args) {
-        if (name == "list_dir") { QDir dir(args["path"].toString()); return dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot).join("\n"); }
-        if (name == "read_file") { QFile file(args["path"].toString()); if (!file.open(QIODevice::ReadOnly)) return "ERROR: " + file.errorString(); return QString::fromUtf8(file.read(200000)); }
-        if (name == "grep_search") { QProcess p; p.start("grep", {"-rEn", args["pattern"].toString(), args["path"].toString()}); p.waitForFinished(20000); return QString::fromUtf8(p.readAllStandardOutput()).left(200000); }
-        if (name == "shell") { QProcess p; p.start("sh", {"-lc", args["command"].toString()}); p.waitForFinished(20000); return QString::fromUtf8(p.readAllStandardOutput() + p.readAllStandardError()).left(200000); }
+        if (name == "list_dir") { QString p=safePath(args["path"].toString()); if(p.isEmpty()) return "ERROR: path outside workspace"; QDir dir(p); return dir.entryList(QDir::AllEntries | QDir::NoDotAndDotDot).join("\n"); }
+        if (name == "read_file") { QString p=safePath(args["path"].toString()); if(p.isEmpty()) return "ERROR: path outside workspace"; QFile file(p); if (!file.open(QIODevice::ReadOnly)) return "ERROR: " + file.errorString(); return QString::fromUtf8(file.read(200000)); }
+        if (name == "grep_search") { QString safe=safePath(args["path"].toString()); if(safe.isEmpty()) return "ERROR: path outside workspace"; QProcess p; p.start("grep", {"-rEn", args["pattern"].toString(), safe}); p.waitForFinished(20000); return QString::fromUtf8(p.readAllStandardOutput()).left(200000); }
+        if (name == "shell") { QStringList parts=args["command"].toString().split(QRegularExpression("\\s+"), Qt::SkipEmptyParts); if(parts.isEmpty()) return "ERROR: empty command"; static const QStringList allow={"pwd","ls","find","grep","cat","head","tail","wc","git","node","npm","cmake","make","ninja","clang","clang++","qmake","python","python3","echo","printf","sed","sort","du","file"}; if(!allow.contains(QFileInfo(parts[0]).fileName())) return "ERROR: command not allowed"; QProcess p; p.setWorkingDirectory(workspacePath()); p.start(parts.takeFirst(), parts); if(!p.waitForFinished(15000)) { p.kill(); return "ERROR: command timeout"; } return QString::fromUtf8(p.readAllStandardOutput()+p.readAllStandardError()).left(200000); }
         return "ERROR: unknown tool " + name;
     }
     bool executeToolCall(const QString &text) {
@@ -138,7 +140,7 @@ private:
         QString text = input->toPlainText().trimmed(); if (text.isEmpty()) return; input->clear(); history.append(QJsonObject{{"role", "user"}, {"content", text}}); appendSession(QJsonObject{{"role", "user"}, {"content", text}}); addBubble("You", text, "", true); requestStep = 0; requestCompletion();
     }
     void requestCompletion() {
-        QJsonObject body{{"model", cfg["model"].toString()}, {"messages", apiMessages()}, {"stream", false}}; QString thinking = cfg["thinking"].toString(); if (!thinking.isEmpty()) body["thinking"] = QJsonObject{{"type", thinking}};
+        QJsonObject body{{"model", cfg["model"].toString()}, {"messages", apiMessages()}, {"stream", false}}; QString thinking = cfg["thinking"].toString(); if (!thinking.isEmpty()) body["thinking"] = QJsonObject{{"type", thinking}}; QString effort=cfg["reasoning_effort"].toString(); if(!effort.isEmpty()) body["reasoning_effort"]=effort;
         QNetworkRequest request(QUrl(cfg["baseURL"].toString())); request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json"); request.setRawHeader("Authorization", ("Bearer " + cfg["apiKey"].toString()).toUtf8()); send->setEnabled(false); send->setText("Working...");
         QNetworkReply *reply = network.post(request, QJsonDocument(body).toJson()); connect(reply, &QNetworkReply::finished, this, [this, reply] {
             send->setText("Send"); send->setEnabled(!input->toPlainText().trimmed().isEmpty()); if (reply->error() != QNetworkReply::NoError) { addBubble("Error", reply->errorString(), "", false); reply->deleteLater(); return; }
