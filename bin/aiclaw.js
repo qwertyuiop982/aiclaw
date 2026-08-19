@@ -43,17 +43,23 @@ prog
   .command('input')
   .description('send content; user -> append to current session; system -> update current session system')
   .argument('<role>', "role: 'user' or 'system'")
-  .argument('<tokens...>', 'tokens separated by comma, or @absolutePath')
+  .argument('[tokens...]', 'tokens separated by comma, or @absolutePath')
   .option('--model <name>', 'override model for this call only')
   .option('--no-strip', 'disable tag strip / thinking extraction')
   .option('--no-history', 'user role: do not include history (one-shot request)')
   .option('--global-system', 'system role: write to current config global system instead of current session')
   .option('--no-tools', 'disable tool-calling loop for this turn')
   .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '6')
+   .option('--stdin', 'read the user message from stdin')
   .action(async (role, tokens, opts) => {
     role = String(role || '').toLowerCase();
     if (role !== 'user' && role !== 'system') { log.err("role must be 'user' or 'system'"); process.exit(2); }
     const cfg = await requireConfigured();
+    if (opts.stdin) {
+      const chunks = [];
+      for await (const chunk of process.stdin) chunks.push(chunk);
+      tokens = [chunks.join('')];
+    }
     const flat = [];
     for (const t of tokens) for (const part of String(t).split(',')) flat.push(part);
     const items = flat.map(utils.parseInputToken).filter(Boolean);
@@ -135,6 +141,38 @@ prog
     } catch (e) { log.err(e.message); process.exit(1); }
   });
 
+// ----- immersive chat -----
+prog
+  .command('chat')
+  .description('immersive chat mode; type messages directly, Ctrl-D or /exit to quit')
+  .option('--no-tools', 'disable tool-calling loop')
+  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '6')
+  .action(async (opts) => {
+    const readline = require('readline');
+    const { spawn } = require('child_process');
+    await requireConfigured();
+    console.log(chalk.cyan('aiclaw chat — type /exit or press Ctrl-D to leave'));
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: chalk.green('you> ') });
+    const ask = () => rl.prompt();
+    const run = (text) => new Promise((resolve) => {
+      const argv = [__filename, 'input', 'user', '--stdin'];
+      if (opts.tools === false) argv.push('--no-tools');
+      if (opts.maxSteps) argv.push('--max-steps', String(opts.maxSteps));
+      const child = spawn(process.execPath, argv, { stdio: ['pipe', 'inherit', 'inherit'], env: process.env });
+      child.stdin.end(text);
+      child.on('close', () => resolve());
+    });
+    rl.on('line', async (line) => {
+      const text = line.trim();
+      if (!text) { ask(); return; }
+      if (text === '/exit' || text === '/quit') { rl.close(); return; }
+      rl.pause();
+      await run(line);
+      rl.resume();
+      ask();
+    });
+    await new Promise(resolve => rl.once('close', resolve));
+  });
 // ----- tool -----
 const toolCmd = prog.command('tool').description('tools (debug/manual invocation)');
 toolCmd
@@ -345,7 +383,8 @@ prog
     fs.writeFileSync(configMod.defaultPath(), JSON.stringify({ current: '', currentSession: '', configs: {} }, null, 2));
     log.ok('reset done');
   });
-prog.addHelpText('after', `\nmain commands:\n  aiclaw config providers        list built-in providers\n  aiclaw config list / use / show\n  aiclaw config system            set global system (only used when no session system)\n  aiclaw model list / set / show  fetch models, set default, show current strategy\n  aiclaw input user "Q"            append Q to current session with history\n  aiclaw input user "Q" --no-history  one-shot without history\n  aiclaw input user "Q" --model X     one-shot with overridden model\n  aiclaw input system "..."        update current session system (guided menu)\n  aiclaw input system "..." --global-system  update global system of current config\n\nsessions:\n  aiclaw session list             show all sessions + current\n  aiclaw session new <name>        create and switch\n  aiclaw session use [name]        switch (omit = show current)\n  aiclaw session show [name]       show messages\n  aiclaw session clear [name]      clear\n  aiclaw session drop <name>       delete\n\nstorage:\n  - API/baseURL/apiKey/model saved in ~/.aiclaw/config.json (mode 600)\n  - sessions are <name>.jsonl under ~/.aiclaw/sessions/\n  - default session is "default"\n`);
+prog.addHelpText('after', `\nmain commands:\n  aiclaw config providers        list built-in providers\n  aiclaw config list / use / show\n  aiclaw config system            set global system (only used when no session system)\n  aiclaw model list / set / show  fetch models, set default, show current strategy\n  aiclaw chat                      immersive interactive chat mode
+  aiclaw input user "Q"            append Q to current session with history\n  aiclaw input user "Q" --no-history  one-shot without history\n  aiclaw input user "Q" --model X     one-shot with overridden model\n  aiclaw input system "..."        update current session system (guided menu)\n  aiclaw input system "..." --global-system  update global system of current config\n\nsessions:\n  aiclaw session list             show all sessions + current\n  aiclaw session new <name>        create and switch\n  aiclaw session use [name]        switch (omit = show current)\n  aiclaw session show [name]       show messages\n  aiclaw session clear [name]      clear\n  aiclaw session drop <name>       delete\n\nstorage:\n  - API/baseURL/apiKey/model saved in ~/.aiclaw/config.json (mode 600)\n  - sessions are <name>.jsonl under ~/.aiclaw/sessions/\n  - default session is "default"\n`);
 prog.parseAsync(process.argv).catch(err => {
   log.err(err && err.message ? err.message : String(err));
   process.exit(1);
