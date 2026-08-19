@@ -32,6 +32,8 @@ async function requireConfigured() {
   else process.exit(0);
   return configMod.getCurrent();
 }
+function shellContext(cwd) { const raw = String(process.env.AICLAW_SHELL_ALLOWLIST || "").trim(); return { cwd: cwd || process.cwd(), allowShell: process.env.AICLAW_ALLOW_SHELL === "1", allowCmds: raw ? raw.split(",").map(x => x.trim()).filter(Boolean) : [] }; }
+function shellContext(cwd) { const raw=String(process.env.AICLAW_SHELL_ALLOWLIST||'').trim(); return {cwd:cwd||process.cwd(),allowShell:process.env.AICLAW_ALLOW_SHELL==='1',allowCmds:raw?raw.split(',').map(x=>x.trim()).filter(Boolean):[]}; }
 const prog = new Command();
 prog
   .name('aiclaw')
@@ -128,7 +130,7 @@ prog
           }
         }
       };
-      const r = await loopMod.runAgentLoop(useCfg, messages, { tools: useTools, maxSteps, onStep, ctx: { cwd: process.cwd(), allowShell: false, allowCmds: [] } });
+      const r = await loopMod.runAgentLoop(useCfg, messages, { tools: useTools, maxSteps, onStep, ctx: shellContext(process.cwd()) });
       const finalText = (r && r.finalText) || '';
       const rendered = opts.strip === false ? finalText : utils.renderReply(finalText);
       process.stdout.write('\n' + rendered + '\n');
@@ -210,7 +212,7 @@ toolCmd
     let args;
     try { args = JSON.parse(jsonStr); }
     catch (e) { log.err('invalid JSON args: ' + e.message); process.exit(2); }
-    const ctx = { cwd: opts.cwd || process.env.HOME || '/' };
+    const ctx = shellContext(opts.cwd || process.cwd());
     const r = await toolsMod.runOne(name, args, ctx);
     console.log(JSON.stringify(r, null, 2));
     process.exit(r && r.ok ? 0 : 1);
@@ -398,8 +400,31 @@ prog
     fs.writeFileSync(configMod.defaultPath(), JSON.stringify({ current: '', currentSession: '', configs: {} }, null, 2));
     log.ok('reset done');
   });
-prog.addHelpText('after', `\nmain commands:\n  aiclaw config providers        list built-in providers\n  aiclaw config list / use / show\n  aiclaw config system            set global system (only used when no session system)\n  aiclaw model list / set / show  fetch models, set default, show current strategy\n  aiclaw chat                      immersive interactive chat mode
-  aiclaw input user "Q"            append Q to current session with history\n  aiclaw input user "Q" --no-history  one-shot without history\n  aiclaw input user "Q" --model X     one-shot with overridden model\n  aiclaw input system "..."        update current session system (guided menu)\n  aiclaw input system "..." --global-system  update global system of current config\n\nsessions:\n  aiclaw session list             show all sessions + current\n  aiclaw session new <name>        create and switch\n  aiclaw session use [name]        switch (omit = show current)\n  aiclaw session show [name]       show messages\n  aiclaw session clear [name]      clear\n  aiclaw session drop <name>       delete\n\nstorage:\n  - API/baseURL/apiKey/model saved in ~/.aiclaw/config.json (mode 600)\n  - sessions are <name>.jsonl under ~/.aiclaw/sessions/\n  - default session is "default"\n`);
+prog.addHelpText('after', `
+main commands:
+  aiclaw chat                      immersive interactive chat mode
+  aiclaw input user @/path/file    read an absolute file into the message
+  Ctrl-Y in chat                   create a new dated conversation
+  /exit or Ctrl-D in chat          leave immersive mode
+
+registered tools:
+  aiclaw tool list
+  aiclaw tool run read_file '{"path":"README.md"}'
+  aiclaw tool run shell '{"cmd":"ls","args":"[\"-la\"]"}'
+
+shell security:
+  shell is disabled by default and never parses shell strings.
+  export AICLAW_WORKSPACE="$PWD"
+  export AICLAW_ALLOW_SHELL=1
+  export AICLAW_SHELL_ALLOWLIST="pwd,ls,cat,grep"
+  aiclaw chat
+  cwd and file paths cannot escape AICLAW_WORKSPACE.
+  args is a JSON array string; operators like | ; && are not supported.
+
+storage:
+  config: ~/.aiclaw/config.json (mode 600)
+  sessions: ~/.aiclaw/sessions/*.jsonl
+`);
 prog.parseAsync(process.argv).catch(err => {
   log.err(err && err.message ? err.message : String(err));
   process.exit(1);
