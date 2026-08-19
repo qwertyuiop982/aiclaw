@@ -157,9 +157,29 @@ prog
     const prompt = () => chalk.green('[' + active + '] you> ');
     console.log(chalk.cyan('aiclaw chat — Ctrl-Y: new dated conversation; /exit or Ctrl-D: quit'));
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: prompt() });
-    readline.emitKeypressEvents(process.stdin, rl);
-    const ask = () => { rl.setPrompt(prompt()); rl.prompt(); };
-    process.stdin.on('keypress', (_str, key) => {
+    readline.emitKeypressEvents(process.stdin);
+    let activeChild = null;
+    let closed = false;
+    let busy = false;
+    let queued = null;
+    const ask = () => { if (!closed && !busy) { rl.setPrompt(prompt()); rl.prompt(); } };
+    const cleanup = () => {
+      if (closed) return;
+      closed = true;
+      if (activeChild && !activeChild.killed) { try { activeChild.kill('SIGTERM'); } catch (_) {} }
+      activeChild = null;
+      try { process.stdin.setRawMode(false); } catch (_) {}
+      try { process.stdin.pause(); } catch (_) {}
+      try { rl.close(); } catch (_) {}
+    };
+    const onInterrupt = () => {
+      if (busy && activeChild) { try { activeChild.kill('SIGINT'); } catch (_) {} return; }
+      cleanup();
+    };
+    process.once('SIGINT', onInterrupt);
+    process.once('SIGTERM', cleanup);
+    rl.on('SIGINT', onInterrupt);
+    const onKeypress = (_str, key) => {
       if (!key || !key.ctrl || key.name !== 'y') return;
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace(/Z$/, '');
       try {
@@ -169,7 +189,8 @@ prog
         process.stdout.write('\n' + chalk.cyan('新对话: ' + active + '\n'));
         rl.prompt();
       } catch (e) { process.stdout.write('\n' + chalk.red('ERROR ' + e.message + '\n')); rl.prompt(); }
-    });
+    };
+    process.stdin.on('keypress', onKeypress);
     const run = (text) => new Promise((resolve) => {
       const argv = [__filename, 'input', 'user', '--stdin'];
       if (opts.tools === false) argv.push('--no-tools');
@@ -177,21 +198,36 @@ prog
       // The request worker gets its own stdin pipe. It must never inherit the
       // interactive readline TTY, otherwise the worker can consume/close chat input.
       const child = spawn(process.execPath, argv, { stdio: ['pipe', 'inherit', 'inherit'], detached: false, env: process.env });
+      activeChild = child;
       let settled = false;
-      const done = () => { if (!settled) { settled = true; resolve(); } };
+      const done = () => { if (!settled) { settled = true; if (activeChild === child) activeChild = null; resolve(); } };
       child.once('error', (e) => { process.stdout.write(chalk.red('\nworker error: ' + e.message + '\n')); done(); });
       child.once('close', (code, signal) => { if (code !== 0 && signal) process.stdout.write(chalk.gray('\nworker stopped: ' + signal + '\n')); done(); });
       child.stdin.once('error', () => {});
       child.stdin.end(String(text));
     });
     rl.on('line', async (line) => {
+      if (closed) return;
+      if (busy) { queued = line; return; }
       const text = line.trim();
       if (!text) { ask(); return; }
-      if (text === '/exit' || text === '/quit') { rl.close(); return; }
+      if (text === '/exit' || text === '/quit') { cleanup(); return; }
+      busy = true;
       rl.pause();
-      try { await run(line); } finally { rl.resume(); ask(); }
+      try { await run(line); } finally {
+        busy = false;
+        if (closed) return;
+        rl.resume();
+        if (queued !== null) { const next = queued; queued = null; setImmediate(() => rl.emit('line', next)); }
+        else ask();
+      }
     });
     await new Promise(resolve => rl.once('close', resolve));
+    cleanup();
+    process.removeListener('keypress', onKeypress);
+    process.removeListener('SIGINT', onInterrupt);
+    process.removeListener('SIGTERM', cleanup);
+    rl.removeListener('SIGINT', onInterrupt);
   });
 // ----- tool -----
 const toolCmd = prog.command('tool').description('tools (debug/manual invocation)');
