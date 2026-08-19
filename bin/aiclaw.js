@@ -32,7 +32,7 @@ async function requireConfigured() {
   else process.exit(0);
   return configMod.getCurrent();
 }
-function shellContext(cwd) { const raw = String(process.env.AICLAW_SHELL_ALLOWLIST || "").trim(); return { cwd: cwd || process.cwd(), allowShell: process.env.AICLAW_ALLOW_SHELL === "1", allowCmds: raw ? raw.split(",").map(x => x.trim()).filter(Boolean) : [] }; }
+function shellContext(cwd) { const raw = String(process.env.AICLAW_SHELL_ALLOWLIST || "").trim(); return { cwd: cwd || process.cwd(), allowShell: process.env.AICLAW_ALLOW_SHELL === "1", allowAllShell: process.env.AICLAW_SHELL_NO_ALLOWLIST === "1", allowCmds: raw ? raw.split(",").map(x => x.trim()).filter(Boolean) : null }; }
 const prog = new Command();
 prog
   .name('aiclaw')
