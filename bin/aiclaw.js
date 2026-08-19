@@ -33,7 +33,6 @@ async function requireConfigured() {
   return configMod.getCurrent();
 }
 function shellContext(cwd) { const raw = String(process.env.AICLAW_SHELL_ALLOWLIST || "").trim(); return { cwd: cwd || process.cwd(), allowShell: process.env.AICLAW_ALLOW_SHELL === "1", allowCmds: raw ? raw.split(",").map(x => x.trim()).filter(Boolean) : [] }; }
-function shellContext(cwd) { const raw=String(process.env.AICLAW_SHELL_ALLOWLIST||'').trim(); return {cwd:cwd||process.cwd(),allowShell:process.env.AICLAW_ALLOW_SHELL==='1',allowCmds:raw?raw.split(',').map(x=>x.trim()).filter(Boolean):[]}; }
 const prog = new Command();
 prog
   .name('aiclaw')
@@ -417,6 +416,8 @@ shell security:
   export AICLAW_WORKSPACE="$PWD"
   export AICLAW_ALLOW_SHELL=1
   export AICLAW_SHELL_ALLOWLIST="pwd,ls,cat,grep"
+  # 关闭命令白名单（高风险，仅可信环境）
+  export AICLAW_SHELL_NO_ALLOWLIST=1
   aiclaw chat
   cwd and file paths cannot escape AICLAW_WORKSPACE.
   args is a JSON array string; operators like | ; && are not supported.
