@@ -213,7 +213,7 @@ toolCmd
     catch (e) { log.err('invalid JSON args: ' + e.message); process.exit(2); }
     const ctx = shellContext(opts.cwd || process.cwd());
     const r = await toolsMod.runOne(name, args, ctx);
-    console.log(JSON.stringify(r, null, 2));
+    console.log(JSON.stringify(configMod.publicConfig(r), null, 2));
     process.exit(r && r.ok ? 0 : 1);
   });
 // ----- config -----
@@ -228,7 +228,7 @@ cfgCmd
       if (hasFullOpts) {
         const r = configMod.create(name, opts);
         log.ok('created config ' + name);
-        console.log(JSON.stringify(r, null, 2));
+        console.log(JSON.stringify(configMod.publicConfig(r), null, 2));
       } else await setup.runCreateWizard({ name, ...opts });
     } catch (e) { log.err(e.message); process.exit(1); }
   });
@@ -257,7 +257,7 @@ cfgCmd
   .action((name) => {
     const c = name ? configMod.get(name) : configMod.getCurrent();
     if (!c) { log.err('config not found'); process.exit(1); }
-    const safe = Object.assign({}, c, { apiKey: c.apiKey ? '***' + c.apiKey.slice(-4) : '' });
+    const safe = configMod.publicConfig(c);
     console.log(JSON.stringify(safe, null, 2));
   });
 cfgCmd
@@ -403,6 +403,13 @@ prog.addHelpText('after', `
 main commands:
   aiclaw chat                      immersive interactive chat mode
   aiclaw input user @/path/file    read an absolute file into the message
+  aiclaw init                       choose OpenAI/Anthropic/Google protocol
+
+protocols:
+  OpenAI 通用: POST /v1/chat/completions
+  Anthropic 通用: POST https://example.com/anthropic
+  Google 通用: POST /v1beta/models/{model}:generateContent
+  Native tool calls are used for OpenAI/Anthropic/Google when supported; legacy text fallback remains enabled.
   Ctrl-Y in chat                   create a new dated conversation
   /exit or Ctrl-D in chat          leave immersive mode
 
