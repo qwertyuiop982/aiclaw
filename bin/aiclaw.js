@@ -163,7 +163,7 @@ prog
       const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace(/Z$/, '');
       try {
         active = sessionMod.setCurrent('chat-' + stamp);
-        rl.setLine('');
+        if (process.stdin.isTTY) { try { readline.cursorTo(process.stdin, 0); readline.clearLine(process.stdin, 0); } catch (_) {} }
         rl.setPrompt(prompt());
         process.stdout.write('\n' + chalk.cyan('新对话: ' + active + '\n'));
         rl.prompt();
