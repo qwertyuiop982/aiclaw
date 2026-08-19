@@ -174,18 +174,22 @@ prog
       const argv = [__filename, 'input', 'user', '--stdin'];
       if (opts.tools === false) argv.push('--no-tools');
       if (opts.maxSteps) argv.push('--max-steps', String(opts.maxSteps));
-      const child = spawn(process.execPath, argv, { stdio: ['pipe', 'inherit', 'inherit'], env: process.env });
-      child.stdin.end(text);
-      child.on('close', () => resolve());
+      // The request worker gets its own stdin pipe. It must never inherit the
+      // interactive readline TTY, otherwise the worker can consume/close chat input.
+      const child = spawn(process.execPath, argv, { stdio: ['pipe', 'inherit', 'inherit'], detached: false, env: process.env });
+      let settled = false;
+      const done = () => { if (!settled) { settled = true; resolve(); } };
+      child.once('error', (e) => { process.stdout.write(chalk.red('\nworker error: ' + e.message + '\n')); done(); });
+      child.once('close', (code, signal) => { if (code !== 0 && signal) process.stdout.write(chalk.gray('\nworker stopped: ' + signal + '\n')); done(); });
+      child.stdin.once('error', () => {});
+      child.stdin.end(String(text));
     });
     rl.on('line', async (line) => {
       const text = line.trim();
       if (!text) { ask(); return; }
       if (text === '/exit' || text === '/quit') { rl.close(); return; }
       rl.pause();
-      await run(line);
-      rl.resume();
-      ask();
+      try { await run(line); } finally { rl.resume(); ask(); }
     });
     await new Promise(resolve => rl.once('close', resolve));
   });
