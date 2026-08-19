@@ -58,7 +58,7 @@ prog
     if (opts.stdin) {
       const chunks = [];
       for await (const chunk of process.stdin) chunks.push(chunk);
-      tokens = [chunks.join('')];
+      tokens = [utils.expandInteractiveFiles(chunks.join(''))];
     }
     const flat = [];
     for (const t of tokens) for (const part of String(t).split(',')) flat.push(part);
@@ -150,10 +150,25 @@ prog
   .action(async (opts) => {
     const readline = require('readline');
     const { spawn } = require('child_process');
+    const sessionMod = require('../lib/session');
     await requireConfigured();
-    console.log(chalk.cyan('aiclaw chat — type /exit or press Ctrl-D to leave'));
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: chalk.green('you> ') });
-    const ask = () => rl.prompt();
+    let active = sessionMod.getCurrentName();
+    const prompt = () => chalk.green('[' + active + '] you> ');
+    console.log(chalk.cyan('aiclaw chat — Ctrl-Y: new dated conversation; /exit or Ctrl-D: quit'));
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout, prompt: prompt() });
+    readline.emitKeypressEvents(process.stdin, rl);
+    const ask = () => { rl.setPrompt(prompt()); rl.prompt(); };
+    process.stdin.on('keypress', (_str, key) => {
+      if (!key || !key.ctrl || key.name !== 'y') return;
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_').replace(/Z$/, '');
+      try {
+        active = sessionMod.setCurrent('chat-' + stamp);
+        rl.setLine('');
+        rl.setPrompt(prompt());
+        process.stdout.write('\n' + chalk.cyan('新对话: ' + active + '\n'));
+        rl.prompt();
+      } catch (e) { process.stdout.write('\n' + chalk.red('ERROR ' + e.message + '\n')); rl.prompt(); }
+    });
     const run = (text) => new Promise((resolve) => {
       const argv = [__filename, 'input', 'user', '--stdin'];
       if (opts.tools === false) argv.push('--no-tools');
