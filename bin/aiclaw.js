@@ -50,7 +50,7 @@ prog
   .option('--no-history', 'user role: do not include history (one-shot request)')
   .option('--global-system', 'system role: write to current config global system instead of current session')
   .option('--no-tools', 'disable tool-calling loop for this turn')
-  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '6')
+  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '20')
    .option('--stdin', 'read the user message from stdin')
   .action(async (role, tokens, opts) => {
     role = String(role || '').toLowerCase();
@@ -103,7 +103,7 @@ prog
     const toolsMod = require('../lib/tools');
     const loopMod = require('../lib/tools/loop');
     const useTools = opts.tools !== false; // commander turns --no-tools into opts.tools=false
-    const maxSteps = Math.max(1, Math.min(20, parseInt(opts.maxSteps, 10) || 6));
+    const maxSteps = Math.max(1, Math.min(20, parseInt(opts.maxSteps, 10) || 20));
     if (useTools) {
       const toolDesc = toolsMod.describeAll();
       const sysIdx = messages.findIndex(m => m.role === 'system');
@@ -147,7 +147,7 @@ prog
   .command('chat')
   .description('immersive chat mode; type messages directly, Ctrl-D or /exit to quit')
   .option('--no-tools', 'disable tool-calling loop')
-  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '6')
+  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '20')
   .action(async (opts) => {
     const readline = require('readline');
     const { spawn } = require('child_process');
@@ -197,10 +197,12 @@ prog
       if (opts.maxSteps) argv.push('--max-steps', String(opts.maxSteps));
       // The request worker gets its own stdin pipe. It must never inherit the
       // interactive readline TTY, otherwise the worker can consume/close chat input.
-      const child = spawn(process.execPath, argv, { stdio: ['pipe', 'inherit', 'inherit'], detached: false, env: process.env });
+      const child = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], detached: false, windowsHide: true, env: process.env });
       activeChild = child;
       let settled = false;
       const done = () => { if (!settled) { settled = true; if (activeChild === child) activeChild = null; resolve(); } };
+      child.stdout.on('data', (chunk) => process.stdout.write(chunk));
+      child.stderr.on('data', (chunk) => process.stderr.write(chunk));
       child.once('error', (e) => { process.stdout.write(chalk.red('\nworker error: ' + e.message + '\n')); done(); });
       child.once('close', (code, signal) => { if (code !== 0 && signal) process.stdout.write(chalk.gray('\nworker stopped: ' + signal + '\n')); done(); });
       child.stdin.once('error', () => {});
