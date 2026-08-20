@@ -50,7 +50,7 @@ prog
   .option('--no-history', 'user role: do not include history (one-shot request)')
   .option('--global-system', 'system role: write to current config global system instead of current session')
   .option('--no-tools', 'disable tool-calling loop for this turn')
-  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '20')
+  .option('--max-steps <n>', 'cap tool-calling steps (1 to 200; 0 = default)', '100')
    .option('--stdin', 'read the user message from stdin')
   .action(async (role, tokens, opts) => {
     role = String(role || '').toLowerCase();
@@ -103,7 +103,7 @@ prog
     const toolsMod = require('../lib/tools');
     const loopMod = require('../lib/tools/loop');
     const useTools = opts.tools !== false; // commander turns --no-tools into opts.tools=false
-    const maxSteps = Math.max(1, Math.min(20, parseInt(opts.maxSteps, 10) || 20));
+    const maxSteps = Math.max(1, Math.min(200, parseInt(opts.maxSteps, 10) || 100));
     if (useTools) {
       const toolDesc = toolsMod.describeAll();
       const sysIdx = messages.findIndex(m => m.role === 'system');
@@ -147,7 +147,7 @@ prog
   .command('chat')
   .description('immersive chat mode; type messages directly, Ctrl-D or /exit to quit')
   .option('--no-tools', 'disable tool-calling loop')
-  .option('--max-steps <n>', 'cap tool-calling steps (1 to 20)', '20')
+  .option('--max-steps <n>', 'cap tool-calling steps (1 to 200; 0 = default)', '100')
   .action(async (opts) => {
     const readline = require('readline');
     const { spawn } = require('child_process');
